@@ -1,0 +1,30 @@
+[package]
+name = "nat_traversal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+
+[lib]
+name = "nat_traversal"
+path = "src/lib.rs"
+
+[[bin]]
+name = "signaling_server"
+path = "bin/signaling_server.rs"
+
+[[bin]]
+name = "client"
+path = "bin/client.rs"
+[[bin]]
+name = "test_signaling"
+path = "bin/test_signaling.rs"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = true
