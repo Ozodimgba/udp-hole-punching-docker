@@ -16,7 +16,7 @@ pub struct Client {
 impl Client {
     pub fn new(id: String, server_addr: SocketAddr) -> io::Result<Self> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.set_read_timeout(Some(Duration::from_millis(10)))?;
+        socket.set_read_timeout(Some(Duration::from_millis(100)))?;
         println!("🔌 Client '{}' created, local: {}", id, socket.local_addr()?);
         
         let socket = Arc::new(socket);
@@ -29,9 +29,6 @@ impl Client {
             listening: false,
         };
         
-        // start background listening immediately
-        client.start_background_listening()?;
-        
         Ok(client)
     }
     
@@ -39,6 +36,7 @@ impl Client {
         let local_port = self.socket.local_addr()?.port();
         let msg = Message::Register { id: self.id.clone(), port: local_port };
         self.send_to_server(&msg)?;
+        println!("✅ Registration packet sent successfully");
         
         let mut buf = [0; 1024];
         let (len, _) = self.socket.recv_from(&mut buf)?;
@@ -48,6 +46,10 @@ impl Client {
         if let Message::RegisterOk { external_addr } = response {
             self.external_addr = Some(external_addr);
             println!("✅ Registered! External address: {}", external_addr);
+
+            // start background listening after successful registration
+            self.start_background_listening()?;
+        
             Ok(())
         } else {
             Err(io::Error::new(io::ErrorKind::Other, "Registration failed"))
@@ -55,7 +57,13 @@ impl Client {
     }
     
     pub fn connect_to_peer(&mut self, peer_id: &str) -> io::Result<SocketAddr> {
-        // discover peer
+        println!("Debug: server_addr = {}", self.server_addr);
+        
+        println!("Temporarily stopping background listener...");
+        self.listening = false;
+        thread::sleep(Duration::from_millis(100)); 
+
+        println!("Step 1: Discovering peer '{}'...", peer_id);
         let discover_msg = Message::Discover { target: peer_id.to_string() };
         self.send_to_server(&discover_msg)?;
         
@@ -65,24 +73,32 @@ impl Client {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         
         let peer_addr = match response {
-            Message::PeerFound { addr, .. } => addr,
+            Message::PeerFound { addr, .. } => {
+                println!("✅ Step 1 complete: Found peer at {}", addr);
+                addr
+            },
             Message::PeerNotFound { .. } => return Err(io::Error::new(io::ErrorKind::NotFound, "Peer not found")),
             _ => return Err(io::Error::new(io::ErrorKind::Other, "Unexpected response")),
         };
         
-        println!("📍 Found peer '{}' at {}", peer_id, peer_addr);
+        println!(" Found peer '{}' at {}", peer_id, peer_addr);
         
-        // request hole punch coordination
+        println!("🔍 Step 2: Requesting hole punch coordination...");
         let punch_msg = Message::HolePunch { from: self.id.clone(), to: peer_id.to_string() };
         self.send_to_server(&punch_msg)?;
-        
-        // wait for START signal
+        println!("✅ Step 2: Hole punch request sent");
+
+        println!("🔍 Step 3: Waiting for START signal...");
         let (len, _) = self.socket.recv_from(&mut buf)?;
+        println!("✅ Step 3: Received {} bytes", len);
+        
         let start_response = Message::decode(&String::from_utf8_lossy(&buf[..len]))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         
         if let Message::StartPunch { timestamp } = start_response {
+            println!("🔍 Step 4: Executing hole punch...");
             self.execute_hole_punch(peer_addr, timestamp)?;
+            println!("✅ Step 4: Hole punch complete");
         }
         
         Ok(peer_addr)
@@ -120,30 +136,40 @@ impl Client {
             let mut buf = [0; 1024];
             
             loop {
-                match socket.recv_from(&mut buf) {
-                    Ok((len, sender)) => {
-                        let data = String::from_utf8_lossy(&buf[..len]);
-                        
-                        if data.starts_with("MSG:") {
-                            println!("\n📥 [{}] Received from {}: {}", client_id, sender, &data[4..]);
-                            print!("{} > ", client_id); 
-                            std::io::Write::flush(&mut std::io::stdout()).unwrap();
-                        } else if data.starts_with("PUNCH:") {
-                            println!("\n🕳️ [{}] Received hole punch from {}", client_id, sender);
-                            let _ = socket.send_to(b"PUNCH_ACK", sender);
-                            print!("{} > ", client_id);
-                            std::io::Write::flush(&mut std::io::stdout()).unwrap();
-                        }
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        // ? no data available, continue listening
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(_) => {
-                        break;
-                    }
-                }
+    match socket.recv_from(&mut buf) {
+        Ok((len, sender)) => {
+            let data = String::from_utf8_lossy(&buf[..len]);
+            
+            if sender.ip().to_string() == "192.168.1.2" && sender.port() == 9090 {
+                println!("\n [{}] Server response intercepted by background listener: {}", client_id, data);
+                println!("This response should be handled by main thread, not background listener");
+                print!("{} > ", client_id);
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            } else if data.starts_with("MSG:") {
+                println!("\n [{}] Received from {}: {}", client_id, sender, &data[4..]);
+                print!("{} > ", client_id); 
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            } else if data.starts_with("PUNCH:") {
+                println!("[{}] Received hole punch from {}", client_id, sender);
+                let _ = socket.send_to(b"PUNCH_ACK", sender);
+                print!("{} > ", client_id);
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            } else {
+                // Unknown message type
+                println!(" [{}] Unknown message from {}: {}", client_id, sender, data);
+                print!("{} > ", client_id);
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
             }
+        }
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+            // no data available, continue listening
+            thread::sleep(Duration::from_millis(10));
+        }
+        Err(_) => {
+            break;
+        }
+    }
+}
             
             println!("\n🔇 Background listener stopped for {}", client_id);
         });
