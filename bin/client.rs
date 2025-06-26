@@ -45,18 +45,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
         // Interactive command loop
         loop {
-            match client.handle_incoming_signaling() {
-            Ok(true) => {
-                // handled a coordination message, continue the loop
-                continue;
-            }
-            Ok(false) => {
-                // no signaling message, proceed with input
-            }
-            Err(e) => {
-                println!("⚠️ Error checking signaling messages: {}", e);
-            }
-        }
 
         print!("{} > ", client_id);
         io::stdout().flush().unwrap();

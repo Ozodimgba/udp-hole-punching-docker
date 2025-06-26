@@ -49,17 +49,25 @@ impl Server {
                 }
             }
             Message::HolePunch { from, to } => {
-                // coordinate hole punch between two peers
-                let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 + 2000;
-                let start_msg = Message::StartPunch { timestamp };
-                
-                if let Some(&from_addr) = self.clients.get(&from) {
-                    self.send_to(&start_msg, from_addr)?;
+                if let (Some(&from_addr), Some(&to_addr)) = (self.clients.get(&from), self.clients.get(&to)) {
+                    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 + 2000;
+
+                    let start_msg_to_requester = Message::StartPunchWithPeer { 
+                        timestamp, 
+                        peer_addr: to_addr 
+                    };
+                    self.send_to(&start_msg_to_requester, from_addr)?;
+                    
+                    let start_msg_to_target = Message::StartPunchWithPeer { 
+                        timestamp, 
+                        peer_addr: from_addr 
+                    };
+                    self.send_to(&start_msg_to_target, to_addr)?;
+                    
+                    println!("🕳️  Coordinating hole punch: {} ({}) ↔ {} ({})", from, from_addr, to, to_addr);
+                } else {
+                    println!("❌ Cannot coordinate hole punch: missing client addresses");
                 }
-                if let Some(&to_addr) = self.clients.get(&to) {
-                    self.send_to(&start_msg, to_addr)?;
-                }
-                println!("🕳️  Coordinating hole punch: {} ↔ {}", from, to);
             }
             _ => {}
         }

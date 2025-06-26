@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 // ============================================================================
-// SIMPLE PROTOCOL
+// PROTOCOL
 // ============================================================================
 
 #[derive(Debug, Clone)]
@@ -13,6 +13,7 @@ pub enum Message {
     PeerNotFound { id: String },
     HolePunch { from: String, to: String },
     StartPunch { timestamp: u64 },
+    StartPunchWithPeer { timestamp: u64, peer_addr: SocketAddr },
 }
 
 impl Message {
@@ -25,10 +26,27 @@ impl Message {
             Message::PeerNotFound { id } => format!("NOPE:{}", id),
             Message::HolePunch { from, to } => format!("PUNCH:{}:{}", from, to),
             Message::StartPunch { timestamp } => format!("START:{}", timestamp),
+            Message::StartPunchWithPeer { timestamp, peer_addr } => {
+                format!("START_PEER|{}|{}", peer_addr, timestamp)  // use | delimiter
+            }
+
         }
     }
     
     pub fn decode(s: &str) -> Result<Self, &'static str> {
+        // handle START_PEER with | delimiter first
+        if s.starts_with("START_PEER|") {
+            let parts: Vec<&str> = s.split('|').collect();
+            if parts.len() == 3 {
+                let peer_addr = parts[1].parse().map_err(|_| "Invalid peer address")?;
+                let timestamp = parts[2].parse().map_err(|_| "Invalid timestamp")?;
+                return Ok(Message::StartPunchWithPeer { timestamp, peer_addr });
+            } else {
+                return Err("Invalid START_PEER format");
+            }
+        }
+        
+        // handle all other messages with : delimiter -> should remove this everything should use pipe
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() < 2 {
             return Err("Invalid message format");
@@ -42,11 +60,9 @@ impl Message {
                 })
             },
             "OK" if parts.len() >= 2 => {
-                // IPv4 addresses 
                 let addr_str = if parts.len() == 3 {
                     format!("{}:{}", parts[1], parts[2])
                 } else {
-                    // IPv6 addresses
                     parts[1..].join(":")
                 };
                 Ok(Message::RegisterOk { 
@@ -55,11 +71,9 @@ impl Message {
             },
             "FIND" => Ok(Message::Discover { target: parts[1].to_string() }),
             "PEER" if parts.len() >= 3 => {
-                // handle both IPv4 and IPv6 addresses
                 let addr_str = if parts.len() == 4 && !parts[2].starts_with('[') {
                     format!("{}:{}", parts[2], parts[3])
                 } else {
-                    // IPv6 or complex address: rejoin everything after peer ID
                     parts[2..].join(":")
                 };
                 Ok(Message::PeerFound { 
