@@ -68,7 +68,6 @@ impl Client {
         }
     }
 
-    // fixed connect_to_peer method in src/client.rs
     pub fn connect_to_peer(&mut self, peer_id: &str) -> io::Result<SocketAddr> {
         println!("🔍 Step 1: Discovering peer '{}'...", peer_id);
 
@@ -79,7 +78,7 @@ impl Client {
         self.send_to_server(&discover_msg)?;
 
         // wait for discovery response (background listener will show it)
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(1000));
 
         println!("🔍 Step 2: Requesting hole punch coordination...");
         let punch_msg = Message::HolePunch {
@@ -93,7 +92,7 @@ impl Client {
         println!("   (Background listener will handle START_PEER message)");
 
         // wait longer for hole punch to complete
-        thread::sleep(Duration::from_millis(3000));
+        thread::sleep(Duration::from_millis(8000));
 
         // check if connection was established by looking at connected peers
         if let Ok(peers) = self.connected_peers.lock() {

@@ -25,29 +25,25 @@ services:
       - .:/workspace
     working_dir: /workspace
     command: |
-        /bin/bash -c "
-          echo 'Alice NAT starting...';
-          echo 1 > /proc/sys/net/ipv4/ip_forward || echo 'IP forward OK';
-          
-          # fix routing:
-          ip route del default || echo 'No default route';
-          ip route add default via 10.0.0.1 dev eth1 || echo 'Default route OK';
-          
-          # add cross-LAN routing
-          ip route add 192.168.2.0/24 via 10.0.0.4 dev eth1 || echo 'Bob LAN route OK';
-          
-          iptables -t nat -A PREROUTING -p udp --dport 9090 -j DNAT --to-destination 10.0.0.2:9090 || echo 'DNAT OK';
-          iptables -t nat -A PREROUTING -p udp --dport 5000 -j DNAT --to-destination 192.168.1.3:5000 || echo 'Alice P2P DNAT OK';
-          
-          iptables -t nat -A POSTROUTING -o eth1 -j SNAT --to-source 10.0.0.3 || echo 'SNAT OK';
-          
-          iptables -A FORWARD -j ACCEPT || echo 'FORWARD OK';
-          iptables -A FORWARD -i eth1 -o eth0 -j ACCEPT || echo 'Interface forward OK';
-          iptables -A FORWARD -i eth0 -o eth1 -j ACCEPT || echo 'Interface forward OK';
-          
-          echo '✅ Alice NAT ready';
-          while true; do sleep 60; echo 'Alice NAT alive'; done
-        "
+      /bin/bash -c "
+        echo 'Alice NAT starting...';
+        echo 1 > /proc/sys/net/ipv4/ip_forward || echo 'IP forward OK';
+
+        # Default should go to internet via eth1
+        ip route del default || echo 'No default route';
+        ip route add default via 10.0.0.1 dev eth1 || echo 'Default route OK';
+        
+        # Full Cone NAT: Masquerade everything going to internet
+
+        # Preserve exact ports for Full Cone NAT
+        iptables -t nat -A POSTROUTING -o eth1 -j SNAT --to-source 10.0.0.3
+        
+        # Allow all forwarding
+        iptables -A FORWARD -j ACCEPT;
+        
+        echo '✅ Alice NAT ready';
+        while true; do sleep 60; echo 'Alice NAT alive'; done
+      "
 
   bob-nat:
     build: .
@@ -63,27 +59,24 @@ services:
       - .:/workspace
     working_dir: /workspace
     command: |
-        /bin/bash -c "
-          echo 'Bob NAT starting...';
-          echo 1 > /proc/sys/net/ipv4/ip_forward || echo 'IP forward OK';
-          
-          ip route del default || echo 'No default route';
-          ip route add default via 10.0.0.1 dev eth1 || echo 'Default route OK';
-            
-          ip route add 192.168.1.0/24 via 10.0.0.3 dev eth1 || echo 'Alice LAN route OK';
-          
-          iptables -t nat -A PREROUTING -p udp --dport 9090 -j DNAT --to-destination 10.0.0.2:9090 || echo 'DNAT OK';
-          iptables -t nat -A PREROUTING -p udp --dport 5000 -j DNAT --to-destination 192.168.2.3:5000 || echo 'Bob P2P DNAT OK';
-          
-          iptables -t nat -A POSTROUTING -o eth1 -j SNAT --to-source 10.0.0.4 || echo 'SNAT OK';
-          
-          iptables -A FORWARD -j ACCEPT || echo 'FORWARD OK';
-          iptables -A FORWARD -i eth1 -o eth0 -j ACCEPT || echo 'Interface forward OK';
-          iptables -A FORWARD -i eth0 -o eth1 -j ACCEPT || echo 'Interface forward OK';
-          
-          echo '✅ Bob NAT ready';
-          while true; do sleep 60; echo 'Bob NAT alive'; done
-        "
+      /bin/bash -c "
+        echo 'BOb NAT starting...';
+        echo 1 > /proc/sys/net/ipv4/ip_forward || echo 'IP forward OK';
+
+        # Default should go to internet via eth1
+        ip route del default || echo 'No default route';
+        ip route add default via 10.0.0.1 dev eth1 || echo 'Default route OK';
+        
+        # Full Cone NAT: Masquerade everything going to internet
+        
+        iptables -t nat -A POSTROUTING -o eth1 -j SNAT --to-source 10.0.0.4
+        
+        # Allow all forwarding
+        iptables -A FORWARD -j ACCEPT;
+        
+        echo '✅ Bob NAT ready';
+        while true; do sleep 60; echo 'Alice NAT alive'; done
+      "
 
   alice:
     build: .
@@ -109,7 +102,7 @@ services:
         ip route add 10.0.0.0/24 via 192.168.1.2 dev eth0 || echo 'Internet route OK';
         
         echo '✅ Alice routing configured';
-        ./target/debug/client alice 192.168.1.2:9090
+        ./target/debug/client alice 10.0.0.2:9090  
       "
   
   bob:
@@ -135,7 +128,7 @@ services:
         ip route add 10.0.0.0/24 via 192.168.2.2 dev eth0 || echo 'Internet route OK';
         
         echo '✅ Bob routing configured';
-        ./target/debug/client bob 192.168.2.2:9090
+        ./target/debug/client bob 10.0.0.2:9090  
       "
 
 networks:

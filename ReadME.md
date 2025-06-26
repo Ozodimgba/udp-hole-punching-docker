@@ -100,4 +100,30 @@ packets enters bridge but brisdge is dropping them not routing
 
 Hole punching works but i have a small bug I have to fix:
 
-Bob can sent messages unless they send out punch packets...I dont think thats right. 
+Bob can sent messages unless they send out punch packets...I dont think thats right.
+
+
+hmmm hole punching success in consistent, tcpdump logs show:
+
+# Alice sends from port 33831
+192.168.1.3.33831 > 10.0.0.4.56907: UDP, length 7
+
+# Bob responds from port 56907, but Alice expects it from a DIFFERENT port!  
+192.168.2.3.56907 > 10.0.0.3.33831: UDP, length 7
+
+but then bob NAT translates bob resposne to
+
+10.0.0.4.7020 > 10.0.0.3.33831: UDP, length 7  
+
+ip rules probably still symetric NAT
+
+### Lunch break lol
+Okay the rules work. should maybe go to nftables instead of nat?
+
+relaxed the rules. Full cone nat should work
+
+Masquerade is filiping the port on outbound.
+
+this is you keep logs...SNAT fixed it
+
+i should still monitor the tcpdump logs
