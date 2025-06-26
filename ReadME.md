@@ -97,3 +97,7 @@ relaxed nat rules
 
 packets enters bridge but brisdge is dropping them not routing
 ```
+
+Hole punching works but i have a small bug I have to fix:
+
+Bob can sent messages unless they send out punch packets...I dont think thats right. 
