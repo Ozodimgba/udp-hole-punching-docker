@@ -144,6 +144,10 @@ impl Client {
             self.socket.send_to(punch_data.as_bytes(), target_addr)?;
             thread::sleep(Duration::from_millis(50));
         }
+
+        if let Ok(mut peers) = self.connected_peers.lock() {
+            peers.insert("peer".to_string(), target_addr);
+        }
         
         println!("✅ Hole punch sequence completed");
         Ok(())
@@ -193,6 +197,11 @@ impl Client {
                                 }
                                 thread::sleep(Duration::from_millis(50));
                             }
+
+                            if let Ok(mut peers) = connected_peers.lock() {
+                                peers.insert("peer".to_string(), peer_addr);
+                                println!("🔗 [{}] Connection established with {}", client_id, peer_addr);
+                            }
                             println!("✅ [{}] Hole punch sequence completed to {}", client_id, peer_addr);
                         }
 
@@ -215,13 +224,22 @@ impl Client {
                 std::io::Write::flush(&mut std::io::stdout()).unwrap();
             } else if data.starts_with("PUNCH:") {
                 println!("\n🕳️ [{}] Received hole punch from {}", client_id, sender);
-                let _ = socket.send_to(b"PUNCH_ACK", sender);
+                let response = format!("PUNCH_ACK:{}", client_id);
+                let _ = socket.send_to(response.as_bytes(), sender);
 
                 if let Ok(mut peers) = connected_peers.lock() {
                     peers.insert("peer".to_string(), sender);
                     println!("🔗 [{}] Connection established with {}", client_id, sender);
                 }
 
+                print!("{} > ", client_id);
+                std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            } else if data.starts_with("PUNCH_ACK:") {
+                println!("\n🤝 [{}] Received punch acknowledgment from {}", client_id, sender);
+                if let Ok(mut peers) = connected_peers.lock() {
+                    peers.insert("peer".to_string(), sender);
+                    println!("🔗 [{}] Connection established with {}", client_id, sender);
+                }
                 print!("{} > ", client_id);
                 std::io::Write::flush(&mut std::io::stdout()).unwrap();
             }

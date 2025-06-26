@@ -29,17 +29,23 @@ services:
           echo 'Alice NAT starting...';
           echo 1 > /proc/sys/net/ipv4/ip_forward || echo 'IP forward OK';
           
-          # fiX routing p:
+          # Fix routing:
           ip route del default || echo 'No default route';
           ip route add default via 10.0.0.1 dev eth1 || echo 'Default route OK';
+          
+          # Add cross-LAN routing
+          ip route add 192.168.2.0/24 via 10.0.0.4 dev eth1 || echo 'Bob LAN route OK';
           
           iptables -t nat -A PREROUTING -p udp --dport 9090 -j DNAT --to-destination 10.0.0.2:9090 || echo 'DNAT OK';
           iptables -t nat -A PREROUTING -p udp --dport 5000 -j DNAT --to-destination 192.168.1.3:5000 || echo 'Alice P2P DNAT OK';
           
-          # simple nat:
-          iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE || echo 'MASQ OK';
+          # Simple nat:
+          iptables -t nat -A POSTROUTING -o eth1 -j SNAT --to-source 10.0.0.3 || echo 'SNAT OK';
           
           iptables -A FORWARD -j ACCEPT || echo 'FORWARD OK';
+          iptables -A FORWARD -i eth1 -o eth0 -j ACCEPT || echo 'Interface forward OK';
+          iptables -A FORWARD -i eth0 -o eth1 -j ACCEPT || echo 'Interface forward OK';
+          
           echo '✅ Alice NAT ready';
           while true; do sleep 60; echo 'Alice NAT alive'; done
         "
@@ -65,13 +71,18 @@ services:
           ip route del default || echo 'No default route';
           ip route add default via 10.0.0.1 dev eth1 || echo 'Default route OK';
           
+          # Add cross-LAN routing  
+          ip route add 192.168.1.0/24 via 10.0.0.3 dev eth1 || echo 'Alice LAN route OK';
+          
           iptables -t nat -A PREROUTING -p udp --dport 9090 -j DNAT --to-destination 10.0.0.2:9090 || echo 'DNAT OK';
           iptables -t nat -A PREROUTING -p udp --dport 5000 -j DNAT --to-destination 192.168.2.3:5000 || echo 'Bob P2P DNAT OK';
           
-          # simple nat:
-          iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE || echo 'MASQ OK';
+          iptables -t nat -A POSTROUTING -o eth1 -j SNAT --to-source 10.0.0.4 || echo 'SNAT OK';
           
           iptables -A FORWARD -j ACCEPT || echo 'FORWARD OK';
+          iptables -A FORWARD -i eth1 -o eth0 -j ACCEPT || echo 'Interface forward OK';
+          iptables -A FORWARD -i eth0 -o eth1 -j ACCEPT || echo 'Interface forward OK';
+          
           echo '✅ Bob NAT ready';
           while true; do sleep 60; echo 'Bob NAT alive'; done
         "
@@ -79,43 +90,57 @@ services:
   alice:
     build: .
     depends_on:
+      - signaling-server
       - alice-nat
+    cap_add:
+      - NET_ADMIN 
     networks:
       alice-lan:
         ipv4_address: 192.168.1.3
-    cap_add:
-    - NET_ADMIN
     volumes:
       - .:/workspace
     working_dir: /workspace
-    privileged: true
-    stdin_open: true
-    tty: true
     command: |
       /bin/bash -c "
-        echo 'Alice client ready';
-        exec tail -f /dev/null
+        echo 'Setting up Alice routing...';
+        
+        # DELETE DEFAULT ROUTE AND SET NAT AS GATEWAY
+        ip route del default || echo 'No default route to delete';
+        ip route add default via 192.168.1.2 dev eth0 || echo 'Default route OK';
+        
+        # ADD INTERNET NETWORK ROUTE - THIS IS KEY!
+        ip route add 10.0.0.0/24 via 192.168.1.2 dev eth0 || echo 'Internet route OK';
+        
+        echo '✅ Alice routing configured';
+        ./target/debug/client alice 192.168.1.2:9090
       "
-
+  
   bob:
     build: .
     depends_on:
+      - signaling-server  
       - bob-nat
+    cap_add:
+      - NET_ADMIN 
     networks:
       bob-lan:
         ipv4_address: 192.168.2.3
-    cap_add:
-    - NET_ADMIN
     volumes:
       - .:/workspace
     working_dir: /workspace
-    privileged: true
-    stdin_open: true
-    tty: true
     command: |
       /bin/bash -c "
-        echo 'Bob client ready';
-        exec tail -f /dev/null
+        echo 'Setting up Bob routing...';
+        
+        # DELETE DEFAULT ROUTE AND SET NAT AS GATEWAY
+        ip route del default || echo 'No default route to delete';
+        ip route add default via 192.168.2.2 dev eth0 || echo 'Default route OK';
+        
+        # ADD INTERNET NETWORK ROUTE - THIS IS KEY!
+        ip route add 10.0.0.0/24 via 192.168.2.2 dev eth0 || echo 'Internet route OK';
+        
+        echo '✅ Bob routing configured';
+        ./target/debug/client bob 192.168.2.2:9090
       "
 
 networks:

@@ -81,4 +81,19 @@ Bob never receives any packets to respond to
 
 suspecting the iptables particularly the MASQUERADE -> could be causing symetric NAT.
 
+Nat rules on Alice -> MASQUERADE  0    --  *      eth1    0.0.0.0/0            0.0.0.0/0
+
+MASQUERADE - Changes source IP for outgoing packets
+ - assign random port for each connection
+ - only allows return traffice from the exact sme IP:port that was contacted
+ looks like symetric mapping -> diff external ports for different dest
+
+```
+
+relaxed nat rules
+```
+08:14:40.300471 vethba47c25 P   IP 192.168.2.3.36502 > 10.0.0.3.34407: UDP, length 7
+08:14:40.300471 br-f823e425d389 In  IP 192.168.2.3.36502 > 10.0.0.3.34407: UDP, length 7
+
+packets enters bridge but brisdge is dropping them not routing
 ```
