@@ -297,8 +297,7 @@ impl Client {
                                     Ok(_) => {
                                         println!("🤝 [{}] Sent punch ACK to {}", client_id, sender);
 
-                                        let latency_ms = 50; // Placeholder - you could implement proper timing
-                                        bg_logger.log_hole_punch_success("peer", latency_ms);
+                                        bg_logger.log_punch_traffic("peer", 50, "PUNCH");
                                     }
                                     Err(e) => println!(
                                         "❌ [{}] Failed to send punch ACK: {}",
@@ -320,8 +319,7 @@ impl Client {
                                     client_id, sender, data
                                 );
 
-                                let latency_ms = 100; // Placeholder
-                                bg_logger.log_hole_punch_success("peer", latency_ms);
+                                bg_logger.log_punch_traffic("peer", 100, "PUNCH_ACK");
 
                                 // store the peer connection when receiving punch ACK
                                 if let Ok(mut peers) = connected_peers.lock() {

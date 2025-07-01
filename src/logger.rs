@@ -105,18 +105,33 @@ impl NatConsoleLogger {
         );
     }
 
-    pub fn log_hole_punch_success(&mut self, peer_id: &str, latency_ms: u64) {
+    /// Called when we receive any punch-related traffic (PUNCH: or PUNCH_ACK:)
+    /// Only marks connection as successful on the FIRST packet, subsequent calls are just traffic
+    pub fn log_punch_traffic(&mut self, peer_id: &str, latency_ms: u64, packet_type: &str) {
         if let Some(stats) = self.stats.get_mut(peer_id) {
-            stats.successful_hole_punches += 1;
-            stats.traversal_success = true;
+            let is_first_connection = !stats.traversal_success;
+            
+            if is_first_connection {
+                // This is the first successful hole punch - connection established!
+                stats.successful_hole_punches += 1;
+                stats.traversal_success = true;
+                stats.connection_state = ConnectionState::Connected;
+                
+                println!(
+                    "✅ HOLE PUNCH SUCCESS for peer: {} ({}ms) via {} - CONNECTION ESTABLISHED!",
+                    peer_id, latency_ms, packet_type
+                );
+            } else {
+                // Connection already established, this is just ongoing traffic
+                println!(
+                    "🔄 Punch traffic from peer: {} ({}ms) via {} - already connected",
+                    peer_id, latency_ms, packet_type
+                );
+            }
+            
+            // Always add latency for average calculation
             stats.total_latency_ms += latency_ms;
-            stats.connection_state = ConnectionState::Connected;
         }
-
-        println!(
-            "✅ Hole punch SUCCESS for peer: {} ({}ms)",
-            peer_id, latency_ms
-        );
     }
 
     pub fn log_hole_punch_failure(&mut self, peer_id: &str) {
@@ -159,6 +174,13 @@ impl NatConsoleLogger {
         }
 
         println!("🔥 Connection failed to {}: {}", peer_id, error);
+    }
+
+    // 🔧 DEPRECATED: backward compatibility
+    #[deprecated(note = "Use log_punch_traffic instead for consistent behavior")]
+    pub fn log_hole_punch_success(&mut self, peer_id: &str, latency_ms: u64) {
+        // forward to new method with generic packet type
+        self.log_punch_traffic(peer_id, latency_ms, "legacy");
     }
 
     // Print address information table
