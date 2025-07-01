@@ -1,6 +1,6 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{io, thread};
 
@@ -15,7 +15,7 @@ pub struct Client {
     listening: bool,
     pub should_listen: Arc<AtomicBool>,
     pub connected_peers: Arc<std::sync::Mutex<std::collections::HashMap<String, SocketAddr>>>, // prolly shit but will do, refactor
-    pub console_logger: NatConsoleLogger,
+    pub console_logger: Arc<Mutex<NatConsoleLogger>>,
 }
 
 impl Client {
@@ -30,9 +30,9 @@ impl Client {
 
         let socket = Arc::new(socket);
         let local_addr = socket.local_addr()?;
-        let mut console_logger = NatConsoleLogger::new(local_addr);
+        let mut console_logger = Arc::new(Mutex::new(NatConsoleLogger::new(local_addr)));
 
-        console_logger.print_address_table();
+        console_logger.lock().unwrap().print_address_table();
 
         let client = Self {
             id: id.clone(),
@@ -64,10 +64,10 @@ impl Client {
 
         if let Message::RegisterOk { external_addr } = response {
             self.external_addr = Some(external_addr);
-            self.console_logger.set_external_addr(external_addr);
+            self.console_logger.lock().unwrap().set_external_addr(external_addr);
             println!("✅ Registered! External address: {}", external_addr);
 
-            self.console_logger.print_address_table();
+            self.console_logger.lock().unwrap().print_address_table();
             // start background listening after successful registration
             self.start_background_listening()?;
 
@@ -135,10 +135,10 @@ impl Client {
         let should_listen = self.should_listen.clone();
         let connected_peers = self.connected_peers.clone();
 
-        let mut bg_logger = NatConsoleLogger::new(self.socket.local_addr()?);
-        if let Some(ext_addr) = self.external_addr {
-            bg_logger.set_external_addr(ext_addr);
-        }
+        let bg_logger = self.console_logger.clone();
+        // if let Some(ext_addr) = self.external_addr {
+        //     bg_logger.set_external_addr(ext_addr);
+        // }
 
         thread::spawn(move || {
             println!("🔊 Background listener started for {}", client_id);
@@ -177,7 +177,7 @@ impl Client {
                                                 client_id, peer_addr, timestamp
                                             );
 
-                                            bg_logger.log_peer_discovery(
+                                            bg_logger.lock().unwrap().log_peer_discovery(
                                                 "peer".to_string(),
                                                 Some(peer_addr),
                                             );
@@ -208,7 +208,7 @@ impl Client {
                                             );
 
                                             for i in 0..10 {
-                                                bg_logger.log_hole_punch_attempt("peer");
+                                                bg_logger.lock().unwrap().log_hole_punch_attempt("peer");
 
                                                 let punch_msg = format!("PUNCH:{}", i);
                                                 match socket
@@ -221,7 +221,7 @@ impl Client {
                                                         );
                                                     }
                                                     Err(e) => {
-                                                        bg_logger.log_hole_punch_failure("peer");
+                                                        bg_logger.lock().unwrap().log_hole_punch_failure("peer");
                                                         println!(
                                                             "❌ [{}] Hole punch {} failed: {}",
                                                             client_id, i, e
@@ -251,7 +251,7 @@ impl Client {
                                         }
 
                                         Message::PeerFound { id, addr } => {
-                                            bg_logger.log_peer_discovery(id.clone(), Some(addr));
+                                            bg_logger.lock().unwrap().log_peer_discovery(id.clone(), Some(addr));
 
                                             println!(
                                                 "🔍 [{}] Peer discovery result: {} at {}",
@@ -285,8 +285,8 @@ impl Client {
                                     "\n📥 [{}] Received message from {}: {}",
                                     client_id, sender, message
                                 );
-                                bg_logger.log_direct_message_received("peer", message, sender);
-                                bg_logger.print_live_update("peer");
+                                bg_logger.lock().unwrap().log_direct_message_received("peer", message, sender);
+                                bg_logger.lock().unwrap().print_live_update("peer");
                             } else if data.starts_with("PUNCH:") {
                                 println!(
                                     "\n🕳️ [{}] Received hole punch from {}: {}",
@@ -297,7 +297,7 @@ impl Client {
                                     Ok(_) => {
                                         println!("🤝 [{}] Sent punch ACK to {}", client_id, sender);
 
-                                        bg_logger.log_punch_traffic("peer", 50, "PUNCH");
+                                        bg_logger.lock().unwrap().log_punch_traffic("peer", 50, "PUNCH");
                                     }
                                     Err(e) => println!(
                                         "❌ [{}] Failed to send punch ACK: {}",
@@ -319,7 +319,7 @@ impl Client {
                                     client_id, sender, data
                                 );
 
-                                bg_logger.log_punch_traffic("peer", 100, "PUNCH_ACK");
+                                bg_logger.lock().unwrap().log_punch_traffic("peer", 100, "PUNCH_ACK");
 
                                 // store the peer connection when receiving punch ACK
                                 if let Ok(mut peers) = connected_peers.lock() {
@@ -331,7 +331,7 @@ impl Client {
                                 }
 
                                 println!("🎉 DIRECT P2P CONNECTION ESTABLISHED!");
-                                bg_logger.print_live_update("peer");
+                                bg_logger.lock().unwrap().print_live_update("peer");
                             } else {
                                 println!(
                                     "\n🔍 [{}] Unknown P2P message from {}: {}",
@@ -364,7 +364,7 @@ impl Client {
         self.socket.send_to(data.as_bytes(), peer_addr)?;
 
         self.log_message_sent("peer", message);
-        self.console_logger.print_live_update("peer");
+        self.console_logger.lock().unwrap().print_live_update("peer");
 
         println!("📤 Sent message to {}: {}", peer_addr, message);
         Ok(())
@@ -404,17 +404,57 @@ impl Client {
         println!("\n{}", separator);
         println!("                    NAT TRAVERSAL DETAILED REPORT");
         println!("{}", separator);
-        self.console_logger.print_full_report();
+        self.console_logger.lock().unwrap().print_full_report();
         println!("{}", separator);
     }
 }
 
-impl NatLoggable for Client {
-    fn get_console_logger(&mut self) -> &mut NatConsoleLogger {
-        &mut self.console_logger
+impl Client {
+    pub fn log_peer_discovered(&mut self, peer_id: String, peer_addr: Option<SocketAddr>) {
+        self.console_logger
+            .lock()
+            .unwrap()
+            .log_peer_discovery(peer_id, peer_addr);
     }
 
-    fn get_console_logger_ref(&self) -> &NatConsoleLogger {
-        &self.console_logger
+    pub fn log_hole_punch_attempt(&mut self, peer_id: &str) {
+        self.console_logger
+            .lock()
+            .unwrap()
+            .log_hole_punch_attempt(peer_id);
+    }
+
+    pub fn log_hole_punch_result(&mut self, peer_id: &str, success: bool, latency_ms: Option<u64>) {
+        if success {
+            if let Some(latency) = latency_ms {
+                self.console_logger
+                    .lock()
+                    .unwrap()
+                    .log_punch_traffic(peer_id, latency, "legacy");
+            }
+        } else {
+            self.console_logger
+                .lock()
+                .unwrap()
+                .log_hole_punch_failure(peer_id);
+        }
+    }
+
+    pub fn log_message_sent(&mut self, peer_id: &str, message: &str) {
+        self.console_logger
+            .lock()
+            .unwrap()
+            .log_direct_message_sent(peer_id, message);
+    }
+
+    pub fn log_message_received(&mut self, peer_id: &str, message: &str, sender_addr: SocketAddr) {
+        self.console_logger
+            .lock()
+            .unwrap()
+            .log_direct_message_received(peer_id, message, sender_addr);
+    }
+
+    pub fn print_status_report(&self) {
+        self.console_logger.lock().unwrap().print_full_report();
     }
 }
